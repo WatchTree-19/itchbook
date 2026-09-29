@@ -1,0 +1,62 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-test:
+    name: ${{ matrix.compiler }} ${{ matrix.config }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+        config: [release, sanitize]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - name: Configure
+        run: |
+          if [ "${{ matrix.compiler }}" = gcc ]; then CXX=g++; else CXX=clang++; fi
+          if [ "${{ matrix.config }}" = sanitize ]; then
+            EXTRA="-DCMAKE_BUILD_TYPE=Debug -DITCHBOOK_SANITIZE=ON -DITCHBOOK_BENCH=OFF"
+          else
+            EXTRA="-DCMAKE_BUILD_TYPE=Release"
+          fi
+          cmake -S . -B build -G Ninja -DCMAKE_CXX_COMPILER=$CXX -DITCHBOOK_WERROR=ON $EXTRA
+      - name: Build
+        run: cmake --build build
+      - name: Unit and differential tests
+        run: ctest --test-dir build --output-on-failure
+      - name: Matching differential, 1,000,000 events per profile
+        if: matrix.config == 'release'
+        run: |
+          python3 reference/run_match_diff.py --match-replay build/match_replay \
+            --events 1000000 --seed 1 --workdir build/difftest
+          python3 reference/run_match_diff.py --match-replay build/match_replay \
+            --events 1000000 --seed 3 --profile thin --workdir build/difftest
+
+  synthetic-sample:
+    name: synthetic ITCH sample is reproducible
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"  # generated with 3.11; 3.10 to 3.13 produce identical bytes
+      - name: Regenerate and compare
+        run: |
+          python3 reference/gen_synthetic_itch.py --out /tmp/synthetic.itch --orders 50000 --seed 5
+          cmp /tmp/synthetic.itch tests/data/synthetic.itch
+
+  mutation:
+    name: mutation check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - name: Plant bugs and require the tests to catch every one
+        run: python3 tools/mutation_check.py

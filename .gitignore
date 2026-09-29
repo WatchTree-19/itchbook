@@ -1,0 +1,15 @@
+# build trees
+build/
+build-*/
+cmake-build-*/
+# market data and large outputs: never committed
+/data/
+*.itch
+!tests/data/synthetic.itch
+*.bin
+*.gz
+*.csv
+events*.txt
+# python
+__pycache__/
+*.pyc
